@@ -1,0 +1,20 @@
+# Kết quả chạy script (tạo lại được bằng cách chạy lại)
+features/
+ket_qua/
+_drive/
+
+# Dữ liệu ảnh: không đẩy lên GitHub (nặng, đã có trên Google Drive của nhóm)
+Data/
+realwaste/
+data_tu_chup/
+
+# File tạm của Python, Jupyter, Word
+__pycache__/
+*.pyc
+.ipynb_checkpoints/
+~$*.docx
+
+# Notebook cũ, đã thay bằng file .py
+*.ipynb
+*.docx
+mau/

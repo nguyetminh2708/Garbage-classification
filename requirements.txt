@@ -1,0 +1,13 @@
+torch
+torchvision
+numpy
+pandas
+scikit-learn
+xgboost
+matplotlib
+pillow
+pillow-heif
+openpyxl
+joblib
+jupyter
+gdown
