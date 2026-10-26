@@ -81,7 +81,7 @@ USE_REALWASTE = True
 #   "mot_mot"  : số ảnh RealWaste bằng số ảnh tự chụp của lớp đó (mỗi lớp 50% / 50%).
 #   "co_dinh"  : cố định N_REALWASTE_PER_CLASS ảnh mỗi lớp.
 REALWASTE_MODE = "bu_du"
-TARGET_PER_CLASS = 400        # dùng cho "bu_du": 5 lớp x 400 = 2.000 ảnh
+TARGET_PER_CLASS = 450        # dùng cho "bu_du": 5 lớp x 450 = 2.250 ảnh
 N_REALWASTE_PER_CLASS = 200   # dùng cho "co_dinh"
 EVEN_SUBFOLDER = True         # trong một lớp, lấy đều từ các thư mục RealWaste (vd Khác: Misc, Glass, Textile mỗi loại 1/3)
 USE_OWN_DATA  = True
@@ -367,15 +367,20 @@ def inspect(path):
 
 info = pd.DataFrame([inspect(p) for p in df.path])
 df = pd.concat([df.reset_index(drop=True), info], axis=1)
+df["ext"] = df.path.str.rsplit(".", n=1).str[-1].str.lower()
+n_truoc = pd.crosstab(df.label, df.source).reindex(CLASSES).fillna(0).astype(int)   # số ảnh trước khi làm sạch
 
 bad = df[~df.ok]
 if len(bad):
     print(f"Bỏ {len(bad)} file không đọc được:"); print(bad[["path", "err"]].to_string())
+loai_bo = [{"Lý do": "File hỏng / không đọc được", "Đường dẫn": r.path, "Lớp": r.label, "Nguồn": r.source, "Ghi chú": r.get("err", "")} for _, r in bad.iterrows()]
 df = df[df.ok].copy()
 
 dup = df.duplicated("md5", keep="first")
 if dup.any():
     print(f"Bỏ {dup.sum()} ảnh trùng lặp nội dung.")
+first_of = df[~dup].set_index("md5").path
+loai_bo += [{"Lý do": "Trùng nội dung", "Đường dẫn": r.path, "Lớp": r.label, "Nguồn": r.source, "Ghi chú": "trùng với " + first_of[r.md5]} for _, r in df[dup].iterrows()]
 df = df[~dup].reset_index(drop=True)
 
 df["square"] = df.w == df.h
@@ -391,6 +396,82 @@ print(df.groupby(["label", "source"]).orig_class.value_counts().to_string())
 print("\nChế độ màu:", df["mode"].value_counts().to_dict())
 if df.small.any():
     warnings.warn(f"{df.small.sum()} ảnh có cạnh < {MIN_SIDE_WARN}px. Xem danh sách: df[df.small]")
+
+
+# ============================================================================
+# 5b. Thống kê dữ liệu ra Excel (minh chứng cho phần thu thập và làm sạch dữ liệu)
+#
+# File thong_ke_du_lieu.xlsx gồm các sheet:
+# | Sheet | Nội dung |
+# | --- | --- |
+# | Tong_quan | Số ảnh theo lớp và nguồn trước / sau làm sạch, số ảnh có sẵn và số ảnh lấy dùng |
+# | Loai_bo | Danh sách file bị loại (hỏng, trùng) kèm lý do |
+# | Kich_thuoc | Thống kê kích thước, tỉ lệ ảnh vuông, ảnh nhỏ theo lớp và nguồn |
+# | Dinh_dang | Số ảnh theo định dạng file và chế độ màu |
+# | Loai_con | Số ảnh theo loại con (thư mục con / loại gốc RealWaste) trong từng lớp |
+# | Danh_sach_anh | Từng ảnh: đường dẫn, lớp, nguồn, loại con, rộng, cao, định dạng |
+# ============================================================================
+def rel(p):
+    try: return os.path.relpath(p, DATA_DIR)
+    except ValueError: return str(p)
+for r_ in loai_bo:
+    r_["Đường dẫn"] = rel(r_["Đường dẫn"]); r_["Ghi chú"] = r_["Ghi chú"].replace("trùng với " + str(DATA_DIR), "trùng với ") if r_["Ghi chú"].startswith("trùng với") else r_["Ghi chú"]
+n_sau = pd.crosstab(df.label, df.source).reindex(CLASSES).fillna(0).astype(int)
+tong_quan = pd.DataFrame({"Lớp": CLASSES})
+for src in n_truoc.columns:
+    tong_quan[f"{src}: trước làm sạch"] = n_truoc[src].to_numpy()
+    tong_quan[f"{src}: sau làm sạch"] = n_sau[src].to_numpy() if src in n_sau else 0
+tong_quan["Tổng sau làm sạch"] = n_sau.sum(axis=1).to_numpy()
+if USE_OWN_DATA and os.path.isdir(OWN_DATA_DIR):
+    tong_quan["Ảnh tự chụp có sẵn"] = [len(list_images(Path(OWN_DATA_DIR) / c)) if (Path(OWN_DATA_DIR) / c).is_dir() else 0 for c in CLASSES]
+if USE_REALWASTE:
+    tong_quan["Ảnh RealWaste có sẵn"] = [sum(len(v) for v in groups[c].values()) for c in CLASSES]
+tong_quan.loc[len(tong_quan)] = ["Tổng"] + [tong_quan[c].sum() for c in tong_quan.columns[1:]]
+
+kich_thuoc = (df.groupby(["label", "source"])
+              .agg(**{"Số ảnh": ("path", "size"), "Rộng min": ("w", "min"), "Rộng trung vị": ("w", "median"), "Rộng max": ("w", "max"),
+                      "Cao min": ("h", "min"), "Cao trung vị": ("h", "median"), "Cao max": ("h", "max"),
+                      "Tỉ lệ ảnh vuông": ("square", "mean"), f"Ảnh có cạnh < {MIN_SIDE_WARN}": ("small", "sum")})
+              .reset_index().rename(columns={"label": "Lớp", "source": "Nguồn"}))
+dinh_dang = pd.crosstab([df.source, df.ext], df.label).reindex(columns=CLASSES).fillna(0).astype(int).reset_index().rename(columns={"source": "Nguồn", "ext": "Định dạng"})
+che_do_mau = pd.crosstab(df.source, df["mode"]).reset_index().rename(columns={"source": "Nguồn"})
+loai_con = df.groupby(["label", "source", "orig_class"]).size().rename("Số ảnh").reset_index().rename(columns={"label": "Lớp", "source": "Nguồn", "orig_class": "Loại con"})
+danh_sach = df[["path", "label", "source", "orig_class", "w", "h", "ext", "mode"]].assign(path=df.path.map(rel)).rename(
+    columns={"path": "Đường dẫn", "label": "Lớp", "source": "Nguồn", "orig_class": "Loại con", "w": "Rộng", "h": "Cao", "ext": "Định dạng", "mode": "Chế độ màu"})
+
+XLSX_DL = f"{OUT_DIR}/thong_ke_du_lieu.xlsx"
+with pd.ExcelWriter(XLSX_DL, engine="openpyxl") as w:
+    tong_quan.to_excel(w, sheet_name="Tong_quan", index=False)
+    pd.DataFrame(loai_bo, columns=["Lý do", "Đường dẫn", "Lớp", "Nguồn", "Ghi chú"]).to_excel(w, sheet_name="Loai_bo", index=False)
+    kich_thuoc.to_excel(w, sheet_name="Kich_thuoc", index=False)
+    dinh_dang.to_excel(w, sheet_name="Dinh_dang", index=False)
+    che_do_mau.to_excel(w, sheet_name="Dinh_dang", index=False, startrow=len(dinh_dang) + 3)
+    loai_con.to_excel(w, sheet_name="Loai_con", index=False)
+    danh_sach.to_excel(w, sheet_name="Danh_sach_anh", index=False)
+from openpyxl import load_workbook
+from openpyxl.styles import Font, PatternFill, Alignment
+_wb = load_workbook(XLSX_DL)
+for _ws in _wb.worksheets:
+    for row in _ws.iter_rows():
+        for c in row:
+            c.font = Font(name="Arial", size=10, bold=(c.row == 1))
+            if c.row == 1:
+                c.fill = PatternFill("solid", fgColor="DCE6F5"); c.alignment = Alignment(wrap_text=True, vertical="center")
+    for col in _ws.columns:
+        width = max(len(str(col[0].value or "")), *(len(str(c.value)) if c.value is not None else 0 for c in col[1:200]), 6)
+        _ws.column_dimensions[col[0].column_letter].width = min(width + 2, 60)
+    _ws.freeze_panes = "A2"
+_wb.save(XLSX_DL)
+print("Đã ghi", XLSX_DL)
+
+# Hình: phân bố kích thước ảnh theo nguồn (trắng đen)
+plt.figure(figsize=(7, 4))
+for src, sub in df.groupby("source"):
+    plt.hist(sub[["w", "h"]].min(axis=1), bins=30, alpha=0.7, label=f"{src} ({len(sub)} ảnh)")
+plt.axvline(MIN_SIDE_WARN, color="red", ls="--", label=f"ngưỡng {MIN_SIDE_WARN}px")
+plt.xlabel("Cạnh ngắn của ảnh (điểm ảnh)"); plt.ylabel("Số ảnh"); plt.title("Phân bố kích thước ảnh theo nguồn")
+plt.legend(); plt.grid(alpha=0.3)
+plt.tight_layout(); plt.savefig(f"{OUT_DIR}/phan_bo_kich_thuoc.png", dpi=120); plt.close()
 
 
 # ============================================================================
@@ -479,9 +560,8 @@ plt.tight_layout(); plt.savefig(f"{OUT_DIR}/anh_truoc_sau_xu_ly.png", dpi=120); 
 # Phân bố số ảnh theo lớp
 # ============================================================================
 counts = pd.crosstab(df.label, df.source).reindex(CLASSES).fillna(0)
-ax = counts.plot.bar(stacked=True, figsize=(7, 4), color=["#444444", "#bbbbbb"][:counts.shape[1]], edgecolor="black", width=0.7)
-ax.set_xlabel(""); ax.set_ylabel("Số ảnh"); ax.set_title("Số ảnh mỗi lớp theo nguồn")
-ax.spines[["top", "right"]].set_visible(False); plt.xticks(rotation=0)
+ax = counts.plot.bar(stacked=True, figsize=(7, 4), rot=0)
+ax.set_xlabel(""); ax.set_ylabel("Số ảnh"); ax.set_title("Số ảnh mỗi lớp theo nguồn"); ax.grid(axis="y", alpha=0.3)
 plt.tight_layout(); plt.savefig(f"{OUT_DIR}/phan_bo_lop.png", dpi=120); plt.close()
 
 
@@ -535,13 +615,11 @@ print(f"PCA {feats_512.shape[1]} -> {n_comp} chiều, giữ lại {kept:.1%} ph�
 for s in m: print(f"  X_{s}: {X[s].shape}")
 
 cum = np.cumsum(pca.explained_variance_ratio_)
-fig, ax = plt.subplots(figsize=(7, 4))
-ax.plot(np.arange(1, n_comp + 1), cum, color="black", lw=2)
-ax.axhline(kept, color="black", ls="--", lw=1)
-ax.text(n_comp, kept, f" {kept:.1%}", va="bottom", ha="right", color="black")
-ax.set_xlabel("Số thành phần chính"); ax.set_ylabel("Phương sai tích lũy được giữ lại")
-ax.set_title("PCA: phương sai giữ lại theo số chiều"); ax.set_ylim(0, 1.02)
-ax.spines[["top", "right"]].set_visible(False)
+plt.figure(figsize=(7, 4))
+plt.plot(np.arange(1, n_comp + 1), cum)
+plt.axhline(kept, color="red", ls="--", label=f"{n_comp} chiều giữ {kept:.1%}")
+plt.xlabel("Số thành phần chính"); plt.ylabel("Phương sai tích lũy được giữ lại")
+plt.title("PCA: phương sai giữ lại theo số chiều"); plt.ylim(0, 1.02); plt.legend(); plt.grid(alpha=0.3)
 plt.tight_layout(); plt.savefig(f"{OUT_DIR}/pca_phuong_sai.png", dpi=120); plt.close()
 
 
@@ -550,14 +628,12 @@ plt.tight_layout(); plt.savefig(f"{OUT_DIR}/pca_phuong_sai.png", dpi=120); plt.c
 #
 # Nếu các lớp đã tách nhau phần nào ngay trên 2 chiều, đặc trưng từ ResNet18 là hữu ích cho bài toán.
 # ============================================================================
-palette = ["black"] * 5
-markers = ["o", "s", "^", "D", "x"]   # trắng đen: phân biệt lớp bằng hình dạng điểm
-fig, ax = plt.subplots(figsize=(7, 5.5))
+plt.figure(figsize=(7, 5.5))
 for i, c in enumerate(CLASSES):
     pts = X["train"][y["train"] == i]
-    ax.scatter(pts[:, 0], pts[:, 1], s=14, alpha=0.55, color=palette[i], marker=markers[i], label=c)
-ax.set_xlabel("PC1"); ax.set_ylabel("PC2"); ax.set_title("Tập train trên 2 thành phần chính đầu")
-ax.legend(frameon=False); ax.spines[["top", "right"]].set_visible(False)
+    plt.scatter(pts[:, 0], pts[:, 1], s=12, alpha=0.6, label=c)
+plt.xlabel("PC1"); plt.ylabel("PC2"); plt.title("Tập train trên 2 thành phần chính đầu")
+plt.legend(); plt.grid(alpha=0.3)
 plt.tight_layout(); plt.savefig(f"{OUT_DIR}/pca_2d.png", dpi=120); plt.close()
 
 
@@ -570,6 +646,7 @@ plt.tight_layout(); plt.savefig(f"{OUT_DIR}/pca_2d.png", dpi=120); plt.close()
 # | features_512_raw.npz | Đặc trưng 512 chiều gốc chưa PCA, để đổi số chiều PCA mà không phải chạy lại ResNet18 |
 # | metadata.csv | Đường dẫn, lớp, nguồn, tập (train/val/test), kích thước từng ảnh |
 # | preprocess.joblib | Scaler và PCA đã fit, dùng để xử lý ảnh mới khi demo |
+# | thong_ke_du_lieu.xlsx | Thống kê dữ liệu: số ảnh theo lớp và nguồn trước / sau làm sạch, file bị loại, kích thước, định dạng, loại con |
 # | *.png | Các hình để đưa vào báo cáo |
 # ============================================================================
 np.savez_compressed(f"{OUT_DIR}/features_128.npz",
