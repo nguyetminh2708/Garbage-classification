@@ -1,20 +1,12 @@
-# Kết quả chạy script (tạo lại được bằng cách chạy lại)
-features/
-ket_qua/
-_drive/
-
-# Dữ liệu ảnh: không đẩy lên GitHub (nặng, đã có trên Google Drive của nhóm)
+# du lieu anh va file nang: tai tu Google Drive cua nhom, khong day len git
 Data/
 realwaste/
-data_tu_chup/
-
-# File tạm của Python, Jupyter, Word
+vectors/
+models/
 __pycache__/
-*.pyc
-.ipynb_checkpoints/
-~$*.docx
-
-# Notebook cũ, đã thay bằng file .py
-*.ipynb
 *.docx
-mau/
+*.pptx
+~$*
+# ket qua va hinh co the day len de ban cung nhom xem; bo comment 2 dong duoi neu muon bo qua
+# ketqua/
+# hinh/
