@@ -26,11 +26,8 @@ import torchvision
 from PIL import Image, ImageOps
 from torchvision import transforms
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
-from chung import CLASSES, KQ, HINH, VEC, N_COMPONENTS, chia_va_pca
+from chung import KQ, VEC, N_COMPONENTS
+from xuat import ve_hinh_pca, ve_hinh_truoc_sau
 
 try:
     from pillow_heif import register_heif_opener
@@ -98,6 +95,9 @@ def trich(net: torch.nn.Module, paths) -> np.ndarray:
     return np.concatenate(out).astype(np.float32)
 
 
+
+
+# ------------------------------ chay ------------------------------
 def main() -> None:
     f = KQ / "danh_sach_anh.csv"
     if not f.exists():
@@ -105,15 +105,7 @@ def main() -> None:
     df = pd.read_csv(f)
     print(f"{len(df)} anh | thiet bi {DEVICE} | torch {torch.__version__}")
 
-    # hinh truoc / sau chuan hoa: moi lop mot anh
-    def denorm(t): return (t.permute(1, 2, 0).numpy() * STD + MEAN).clip(0, 1)
-    sample = df.groupby("label").sample(1, random_state=42).set_index("label").reindex(CLASSES)
-    fig, axes = plt.subplots(2, len(CLASSES), figsize=(3 * len(CLASSES), 6.4))
-    for j, (label, r) in enumerate(sample.iterrows()):
-        axes[0, j].imshow(load_rgb(r.path)); axes[0, j].set_title(f"{label}\n{r.w}x{r.h} ({r.source})", fontsize=9)
-        axes[1, j].imshow(denorm(to_tensor(load_rgb(r.path)))); axes[1, j].set_title(f"sau xử lý {IMG_SIZE}x{IMG_SIZE}", fontsize=9)
-    for a in axes.ravel(): a.axis("off")
-    plt.tight_layout(); plt.savefig(HINH / "hinh_3_3_anh_truoc_sau.png", dpi=120); plt.close()
+    ve_hinh_truoc_sau(df, load_rgb, to_tensor, MEAN, STD, IMG_SIZE)
 
     print("Dang trich dac trung bang ResNet18...")
     feats = trich(tao_backbone(), df.path)
@@ -121,24 +113,7 @@ def main() -> None:
                         label=df.label.to_numpy(), source=df.source.to_numpy())
     print(f"Ma tran dac trung: {feats.shape} -> vectors/features_512.npz")
 
-    # minh hoa PCA tren mot lan chia (seed 42): phuong sai tich luy va 2 thanh phan dau
-    meta = df[["path", "label", "source"]].copy(); meta["y"] = meta.label.map({c: i for i, c in enumerate(CLASSES)})
-    X, y, _, prep, kept = chia_va_pca(meta, feats, 42, N_COMPONENTS)
-    cum = np.cumsum(prep["pca"].explained_variance_ratio_)
-    plt.figure(figsize=(7, 4))
-    plt.plot(np.arange(1, len(cum) + 1), cum)
-    plt.axhline(kept, color="red", ls="--", label=f"{len(cum)} chiều giữ {kept:.1%}")
-    plt.xlabel("Số thành phần chính"); plt.ylabel("Phương sai tích lũy được giữ lại")
-    plt.title("PCA: phương sai giữ lại theo số chiều"); plt.ylim(0, 1.02); plt.legend(); plt.grid(alpha=0.3)
-    plt.tight_layout(); plt.savefig(HINH / "hinh_3_4a_pca_phuong_sai.png", dpi=120); plt.close()
-
-    Z = prep["pca"].transform(prep["scaler_512"].transform(feats))   # toa do PCA chua chuan hoa lan 2, chi de ve
-    plt.figure(figsize=(7, 5.5))
-    for i, c in enumerate(CLASSES):
-        pts = Z[meta.y.to_numpy() == i]
-        plt.scatter(pts[:, 0], pts[:, 1], s=12, alpha=0.6, label=c)
-    plt.xlabel("PC1"); plt.ylabel("PC2"); plt.title("Dữ liệu trên 2 thành phần chính đầu"); plt.legend(); plt.grid(alpha=0.3)
-    plt.tight_layout(); plt.savefig(HINH / "hinh_3_4b_pca_2d.png", dpi=120); plt.close()
+    kept = ve_hinh_pca(df, feats)
     print(f"PCA {N_COMPONENTS} chieu giu {kept:.1%} phuong sai. Da ghi hinh/hinh_3_3, hinh_3_4a, hinh_3_4b")
 
 

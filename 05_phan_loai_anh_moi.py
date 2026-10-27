@@ -20,7 +20,6 @@ import sys
 from pathlib import Path
 
 import joblib
-import numpy as np
 
 from chung import BASE, CLASSES, MODEL, MODEL_NAMES, TEN_LOP
 

@@ -9,6 +9,7 @@ Thu muc du an:
   ketqua/                   danh sach anh sau lam sach (csv) va cac bang ket qua (xlsx, csv)
   hinh/                     hinh ve cho bao cao, dat ten theo so hinh trong bao cao
   models/                   mo hinh da huan luyen (joblib)
+File xuat.py chua phan ghi Excel / CSV va ve hinh; file nay chi co logic.
 """
 
 import copy
@@ -214,28 +215,3 @@ def danh_gia_test(m, X, y, src_test):
         mask = src_test == src
         out[ten] = accuracy_score(y["test"][mask], p[mask]) if mask.any() else None
     return out, p
-
-
-def dinh_dang_excel(path):
-    """Font, do rong cot, dinh dang so cho cac sheet du lieu (tru sheet dau neu la sheet tong hop)."""
-    from openpyxl import load_workbook
-    from openpyxl.styles import Alignment, Font, PatternFill
-    wb = load_workbook(path)
-    for ws in wb.worksheets:
-        if ws.title == "Tong_hop":
-            continue
-        for row in ws.iter_rows():
-            for c in row:
-                c.font = Font(name="Arial", size=10, bold=(c.row == 1))
-                if c.row == 1:
-                    c.fill = PatternFill("solid", fgColor="DCE6F5"); c.alignment = Alignment(wrap_text=True, vertical="center")
-        for col in ws.columns:
-            head = str(col[0].value or "")
-            width = max(len(head), *(len(str(c.value)) if c.value is not None else 0 for c in col[1:200]), 6)
-            ws.column_dimensions[col[0].column_letter].width = min(width + 2, 45)
-            if any(k in head for k in ["Acc", "Precision", "Recall", "F1", "phương sai", "Loss"]):
-                for c in col[1:]: c.number_format = "0.0000"
-            if "Thời gian" in head or "dừng TB" in head:
-                for c in col[1:]: c.number_format = "0.0"
-        ws.freeze_panes = "A2"
-    wb.save(path)

@@ -27,11 +27,8 @@ from pathlib import Path
 import pandas as pd
 from PIL import Image, ImageOps
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
-
-from chung import BASE, CLASSES, DATA_ANH, HINH, KQ
+from chung import BASE, CLASSES, DATA_ANH
+from xuat import rel, thong_ke_du_lieu, ve_hinh_du_lieu, xuat_thong_ke_du_lieu
 
 try:
     from pillow_heif import register_heif_opener   # doc anh HEIC cua iPhone
@@ -51,6 +48,9 @@ SEED = 42
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".heif"}
 
 
+# ============================================================================
+# 1. Gom danh sach anh va can bang lop
+# ============================================================================
 def list_images(folder: Path) -> list[Path]:
     return sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in IMG_EXTS and not p.name.startswith("."))
 
@@ -120,25 +120,19 @@ def inspect(path: str) -> dict:
         return {"ok": False, "w": None, "h": None, "mode": None, "md5": None, "err": str(e)[:80]}
 
 
-def rel(p: str) -> str:
-    try:
-        return str(Path(p).relative_to(DATA_ANH))
-    except ValueError:
-        return p
 
 
-def main() -> None:
-    rows, own_avail, rw_avail = gom_danh_sach()
-    if not rows:
-        sys.exit("Khong co anh nao. Kiem tra thu muc Data/anh_tu_chup va Data/realwaste.")
-    df = pd.DataFrame(rows)
+# ============================================================================
+# 2. Kiem tra va lam sach
+# ============================================================================
+def kiem_tra_va_lam_sach(df: pd.DataFrame) -> tuple[pd.DataFrame, list[dict], pd.DataFrame]:
+    """Mo thu tung anh, bo file hong va anh trung. Tra ve (df sach, danh sach bi loai, so anh truoc lam sach)."""
     print(f"Gom {len(df)} anh. Dang kiem tra tung anh...")
     info = pd.DataFrame([inspect(p) for p in df.path])
     df = pd.concat([df, info], axis=1)
     df["ext"] = df.path.str.rsplit(".", n=1).str[-1].str.lower()
     n_truoc = pd.crosstab(df.label, df.source).reindex(CLASSES).fillna(0).astype(int)
 
-    # ------------------------------ lam sach ------------------------------
     bad = df[~df.ok]
     loai_bo = [{"Lý do": "File hỏng / không đọc được", "Đường dẫn": rel(r.path), "Lớp": r.label, "Nguồn": r.source, "Ghi chú": r.err}
                for _, r in bad.iterrows()]
@@ -151,58 +145,21 @@ def main() -> None:
     df["square"] = df.w == df.h
     df["small"] = df[["w", "h"]].min(axis=1) < MIN_SIDE_WARN
     print(f"Bo {len(bad)} file hong, {int(dup.sum())} anh trung. Con {len(df)} anh.")
+    return df, loai_bo, n_truoc
 
-    # ------------------------------ thong ke ------------------------------
-    n_sau = pd.crosstab(df.label, df.source).reindex(CLASSES).fillna(0).astype(int)
-    tong_quan = pd.DataFrame({"Lớp": CLASSES})
-    for src in ["tu_chup", "realwaste"]:
-        tong_quan[f"{src}: trước làm sạch"] = n_truoc[src].to_numpy() if src in n_truoc else 0
-        tong_quan[f"{src}: sau làm sạch"] = n_sau[src].to_numpy() if src in n_sau else 0
-    tong_quan["Tổng sau làm sạch"] = n_sau.sum(axis=1).to_numpy()
-    tong_quan["Ảnh tự chụp có sẵn"] = [own_avail[c] for c in CLASSES]
-    tong_quan["Ảnh RealWaste có sẵn"] = [rw_avail[c] for c in CLASSES]
-    tong_quan.loc[len(tong_quan)] = ["Tổng"] + [tong_quan[c].sum() for c in tong_quan.columns[1:]]
 
-    kich_thuoc = (df.groupby(["label", "source"])
-                  .agg(**{"Số ảnh": ("path", "size"), "Rộng min": ("w", "min"), "Rộng trung vị": ("w", "median"), "Rộng max": ("w", "max"),
-                          "Cao min": ("h", "min"), "Cao trung vị": ("h", "median"), "Cao max": ("h", "max"),
-                          "Tỉ lệ ảnh vuông": ("square", "mean"), f"Ảnh có cạnh < {MIN_SIDE_WARN}": ("small", "sum")})
-                  .reset_index().rename(columns={"label": "Lớp", "source": "Nguồn"}))
-    dinh_dang = pd.crosstab([df.source, df.ext], df.label).reindex(columns=CLASSES).fillna(0).astype(int).reset_index().rename(columns={"source": "Nguồn", "ext": "Định dạng"})
-    che_do_mau = pd.crosstab(df.source, df["mode"]).reset_index().rename(columns={"source": "Nguồn"})
-    loai_con = df.groupby(["label", "source", "orig_class"]).size().rename("Số ảnh").reset_index().rename(columns={"label": "Lớp", "source": "Nguồn", "orig_class": "Loại con"})
-    danh_sach = df[["path", "label", "source", "orig_class", "w", "h", "ext", "mode"]].assign(path=df.path.map(rel)).rename(
-        columns={"path": "Đường dẫn", "label": "Lớp", "source": "Nguồn", "orig_class": "Loại con", "w": "Rộng", "h": "Cao", "ext": "Định dạng", "mode": "Chế độ màu"})
-
-    xlsx = KQ / "thong_ke_du_lieu.xlsx"
-    with pd.ExcelWriter(xlsx, engine="openpyxl") as w:
-        tong_quan.to_excel(w, sheet_name="Tong_quan", index=False)
-        pd.DataFrame(loai_bo, columns=["Lý do", "Đường dẫn", "Lớp", "Nguồn", "Ghi chú"]).to_excel(w, sheet_name="Loai_bo", index=False)
-        kich_thuoc.to_excel(w, sheet_name="Kich_thuoc", index=False)
-        dinh_dang.to_excel(w, sheet_name="Dinh_dang", index=False)
-        che_do_mau.to_excel(w, sheet_name="Dinh_dang", index=False, startrow=len(dinh_dang) + 3)
-        loai_con.to_excel(w, sheet_name="Loai_con", index=False)
-        danh_sach.to_excel(w, sheet_name="Danh_sach_anh", index=False)
-    from chung import dinh_dang_excel
-    dinh_dang_excel(xlsx)
-
-    df.drop(columns=["ok", "md5", "err"]).to_csv(KQ / "danh_sach_anh.csv", index=False, encoding="utf-8-sig")
-
-    # -------------------------------- hinh --------------------------------
-    counts = pd.crosstab(df.label, df.source).reindex(CLASSES).fillna(0)
-    ax = counts.plot.bar(stacked=True, figsize=(7, 4), rot=0)
-    ax.set_xlabel(""); ax.set_ylabel("Số ảnh"); ax.set_title("Số ảnh mỗi lớp theo nguồn"); ax.grid(axis="y", alpha=0.3)
-    plt.tight_layout(); plt.savefig(HINH / "hinh_3_1_phan_bo_lop.png", dpi=120); plt.close()
-
-    plt.figure(figsize=(7, 4))
-    for src, sub in df.groupby("source"):
-        plt.hist(sub[["w", "h"]].min(axis=1), bins=30, alpha=0.7, label=f"{src} ({len(sub)} ảnh)")
-    plt.axvline(MIN_SIDE_WARN, color="red", ls="--", label=f"ngưỡng {MIN_SIDE_WARN}px")
-    plt.xlabel("Cạnh ngắn của ảnh (điểm ảnh)"); plt.ylabel("Số ảnh"); plt.title("Phân bố kích thước ảnh theo nguồn")
-    plt.legend(); plt.grid(alpha=0.3)
-    plt.tight_layout(); plt.savefig(HINH / "hinh_3_2_phan_bo_kich_thuoc.png", dpi=120); plt.close()
-
-    print("\n" + tong_quan.to_string(index=False))
+# ============================================================================
+# 3. Chay (thong ke, Excel, hinh: xem xuat.py)
+# ============================================================================
+def main() -> None:
+    rows, own_avail, rw_avail = gom_danh_sach()
+    if not rows:
+        sys.exit("Khong co anh nao. Kiem tra thu muc Data/anh_tu_chup va Data/realwaste.")
+    df, loai_bo, n_truoc = kiem_tra_va_lam_sach(pd.DataFrame(rows))
+    tk = thong_ke_du_lieu(df, n_truoc, own_avail, rw_avail, MIN_SIDE_WARN)
+    xuat_thong_ke_du_lieu(df, tk, loai_bo)
+    ve_hinh_du_lieu(df, MIN_SIDE_WARN)
+    print("\n" + tk["tong_quan"].to_string(index=False))
     print("\nDa ghi: ketqua/danh_sach_anh.csv, ketqua/thong_ke_du_lieu.xlsx, hinh/hinh_3_1, hinh_3_2")
 
 

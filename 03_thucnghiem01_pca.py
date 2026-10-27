@@ -17,14 +17,10 @@ import time
 
 import pandas as pd
 
-import matplotlib
-matplotlib.use("Agg")
-import matplotlib.pyplot as plt
+from chung import DEFAULT_HP, MODEL_NAMES, SEEDS, chia_va_pca, danh_gia_test, doc_dac_trung, huan_luyen
+from xuat import tong_hop_pca, ve_hinh_thucnghiem01, xuat_thucnghiem01
 
-from chung import (DEFAULT_HP, HINH, KQ, MODEL_NAMES, SEEDS, chia_va_pca, danh_gia_test,
-                   doc_dac_trung, huan_luyen)
-
-PCA_DIMS = [32, 64, 128, 256, 512]
+PCA_DIMS = [32, 64, 128, 256, 512]      # cac muc so chieu thu; 512 = khong PCA
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
@@ -32,11 +28,9 @@ except Exception:
     pass
 
 
-def main() -> None:
-    meta, F = doc_dac_trung()
-    print(f"{len(meta)} anh, dac trung {F.shape[1]} chieu")
-    print(pd.crosstab(meta.label, meta.source, margins=True, margins_name="Tong").to_string(), "\n")
-
+# ------------------------------ chay thuc nghiem ------------------------------
+def chay(meta, F) -> pd.DataFrame:
+    """Moi muc so chieu x moi lan chay x moi mo hinh: mot dong ket qua."""
     rows = []
     for dim in PCA_DIMS:
         t0 = time.time()
@@ -54,24 +48,22 @@ def main() -> None:
         sub = pd.DataFrame(rows); sub = sub[sub["Số chiều"] == dim]
         print(f"  {dim:>3} chieu ({time.time() - t0:.0f}s)  acc val TB  " +
               " | ".join(f"{n}: {sub[sub['Mô hình'] == n]['Acc val'].mean():.3f}" for n in MODEL_NAMES))
+    return pd.DataFrame(rows)
 
-    df = pd.DataFrame(rows)
-    tb = (df.groupby(["Mô hình", "Số chiều"], sort=False)
-          .agg(**{"PCA giữ phương sai": ("PCA giữ phương sai", "mean"), "Acc train TB": ("Acc train", "mean"),
-                  "Acc val TB": ("Acc val", "mean"), "Acc val ĐLC": ("Acc val", "std"),
-                  "Acc test TB": ("Acc test", "mean"), "Acc test ĐLC": ("Acc test", "std"),
-                  "F1 test TB": ("F1 macro test", "mean"), "Thời gian TB (giây)": ("Thời gian (giây)", "mean")}).reset_index())
-    df.to_csv(KQ / "thucnghiem01_pca.csv", index=False, encoding="utf-8-sig")
-    tb.to_csv(KQ / "thucnghiem01_pca_tb.csv", index=False, encoding="utf-8-sig", float_format="%.4f")
 
-    plt.figure(figsize=(7, 4))
-    for name in MODEL_NAMES:
-        mu = df[df["Mô hình"] == name].groupby("Số chiều")["Acc val"].mean()
-        plt.plot(mu.index, mu.values, marker="o", label=name)
-    plt.xscale("log", base=2); plt.xticks(PCA_DIMS, [str(d) for d in PCA_DIMS])
-    plt.xlabel("Số chiều sau PCA (512 = không giảm chiều)"); plt.ylabel("Accuracy val (trung bình 5 lần)")
-    plt.title("Khảo sát số chiều PCA"); plt.legend(); plt.grid(alpha=0.3)
-    plt.tight_layout(); plt.savefig(HINH / "hinh_4_1_khao_sat_pca.png", dpi=120); plt.close()
+
+
+
+# ------------------------------ chay ------------------------------
+def main() -> None:
+    meta, F = doc_dac_trung()
+    print(f"{len(meta)} anh, dac trung {F.shape[1]} chieu")
+    print(pd.crosstab(meta.label, meta.source, margins=True, margins_name="Tong").to_string(), "\n")
+
+    df = chay(meta, F)
+    tb = tong_hop_pca(df)
+    xuat_thucnghiem01(df, tb)
+    ve_hinh_thucnghiem01(df, PCA_DIMS)
 
     print("\n" + tb.to_string(index=False, float_format=lambda v: f"{v:.3f}"))
     print("\nDa ghi: ketqua/thucnghiem01_pca.csv, ketqua/thucnghiem01_pca_tb.csv, hinh/hinh_4_1_khao_sat_pca.png")

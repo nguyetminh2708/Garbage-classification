@@ -22,7 +22,8 @@ Data/
 ## Cấu trúc thư mục
 
 ```
-chung.py                            hằng số, lưới siêu tham số và hàm dùng chung
+chung.py                            hằng số, lưới siêu tham số và hàm dùng chung (chia tập, PCA, huấn luyện 3 mô hình)
+xuat.py                             phần ghi Excel / CSV và vẽ hình cho các bước, tách riêng để file bước chỉ còn logic
 01_thong_ke_du_lieu.py              gom ảnh, cân bằng lớp, làm sạch, thống kê      -> ketqua/danh_sach_anh.csv, ketqua/thong_ke_du_lieu.xlsx, hinh/hinh_3_*
 02_trich_dac_trung.py               chuẩn hóa ảnh, ResNet18 -> vector 512 chiều   -> vectors/features_512.npz, hinh/hinh_3_*
 03_thucnghiem01_pca.py              thực nghiệm 01: khảo sát số chiều PCA          -> ketqua/thucnghiem01_pca*.csv, hinh/hinh_4_1
