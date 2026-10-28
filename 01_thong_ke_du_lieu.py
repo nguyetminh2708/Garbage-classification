@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
-Buoc 1: Gom danh sach anh, can bang so anh moi lop, lam sach va thong ke du lieu.
+Buoc 1: Gom danh sach anh, lam sach va thong ke du lieu.
 
 Nguon anh (anh nam trong thu muc lop nao thi mang nhan do, script khong tu doi nhan):
   Data/anh_tu_chup/<lop>/   anh nhom tu chup
   Data/realwaste/<lop>/     anh RealWaste da xep thu cong vao 5 lop
 
-Can bang: moi lop lay HET anh tu chup, phan con thieu toi TARGET_PER_CLASS bu bang anh RealWaste
-chon ngau nhien (seed co dinh), lay deu giua cac loai con (Glass, Textile Trash, ...).
+Dung toan bo anh cua ca hai nguon: hai nguon xap xi 50/50, cac lop chenh nhau khong qua 20% nen khong can can bang.
 
 Lam sach: bo file khong doc duoc; bo anh trung noi dung (so ma bam MD5); xoay theo EXIF roi do kich thuoc.
 
@@ -19,7 +18,6 @@ Dau ra:
 """
 
 import hashlib
-import random
 import re
 import sys
 from pathlib import Path
@@ -42,33 +40,20 @@ except Exception:
     pass
 
 OWN_DIR, RW_DIR = DATA_ANH / "anh_tu_chup", DATA_ANH / "realwaste"
-TARGET_PER_CLASS = 450      # muc can bang moi lop
 MIN_SIDE_WARN = 224         # anh co canh nho hon muc nay se bi danh dau (phong to se mo)
-SEED = 42
 IMG_EXTS = {".jpg", ".jpeg", ".png", ".bmp", ".webp", ".tif", ".tiff", ".heic", ".heif"}
 
 
 # ============================================================================
-# 1. Gom danh sach anh va can bang lop
+# 1. Gom danh sach anh
 # ============================================================================
 def list_images(folder: Path) -> list[Path]:
     return sorted(p for p in folder.rglob("*") if p.is_file() and p.suffix.lower() in IMG_EXTS and not p.name.startswith("."))
 
 
-def sample_even(groups: dict, n: int, rng: random.Random) -> list:
-    """Lay n anh chia deu cho cac loai con; loai nao het thi phan du don sang loai khac."""
-    pools = {k: rng.sample(v, len(v)) for k, v in groups.items()}
-    picked = []
-    while len(picked) < n and any(pools.values()):
-        for k in list(pools):
-            if pools[k] and len(picked) < n:
-                picked.append((pools[k].pop(), k))
-    return picked
-
 
 def gom_danh_sach() -> tuple[list[dict], dict, dict]:
-    """Tra ve (rows, so anh tu chup co san theo lop, so anh RealWaste co san theo lop)."""
-    rng = random.Random(SEED)
+    """Gom moi anh trong Data/anh_tu_chup va Data/realwaste. Tra ve (rows, so anh tu chup theo lop, so anh RealWaste theo lop)."""
     rows = []
     for c in CLASSES:
         d = OWN_DIR / c
@@ -80,32 +65,16 @@ def gom_danh_sach() -> tuple[list[dict], dict, dict]:
             rows.append({"path": str(p), "label": c, "source": "tu_chup", "orig_class": sub})
     own_avail = {c: sum(1 for r in rows if r["label"] == c) for c in CLASSES}
 
-    # lop nao nhieu hon muc can bang thi lay ngau nhien cho vua
-    kept = []
-    for c in CLASSES:
-        mine = [r for r in rows if r["label"] == c]
-        if len(mine) > TARGET_PER_CLASS:
-            print(f"(luu y) lop {c} co {len(mine)} anh tu chup, chi lay ngau nhien {TARGET_PER_CLASS}")
-            mine = rng.sample(mine, TARGET_PER_CLASS)
-        kept += mine
-    rows = kept
-    own_count = {c: sum(1 for r in rows if r["label"] == c) for c in CLASSES}
-
     rw_avail = {}
     for c in CLASSES:
         d = RW_DIR / c
-        groups = {}
+        n = 0
         if d.is_dir():
             for p in list_images(d):
-                orig = re.sub(r"[_ ]?\(?\d+\)?$", "", p.stem) or c   # "Glass_176" -> "Glass", chi de thong ke
-                groups.setdefault(orig, []).append(p)
-        rw_avail[c] = sum(len(v) for v in groups.values())
-        need = max(TARGET_PER_CLASS - own_count[c], 0)
-        if need > rw_avail[c]:
-            print(f"(luu y) lop {c} can {need} anh RealWaste nhung chi co {rw_avail[c]}")
-            need = rw_avail[c]
-        rows += [{"path": str(p), "label": c, "source": "realwaste", "orig_class": k}
-                 for p, k in sample_even(groups, need, rng)]
+                orig = re.sub(r"[_ ]?\(?\d+\)?$", "", p.stem) or c   # "Glass_176" -> "Glass", chi de thong ke loai con
+                rows.append({"path": str(p), "label": c, "source": "realwaste", "orig_class": orig})
+                n += 1
+        rw_avail[c] = n
     return rows, own_avail, rw_avail
 
 

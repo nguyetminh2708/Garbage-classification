@@ -2,7 +2,7 @@
 """
 Buoc 5 (demo): Phan loai MOT hoac nhieu anh moi, khong co trong bo du lieu.
 
-Anh moi di dung con duong ma 2.213 anh cu da di:
+Anh moi di dung con duong ma cac anh trong bo du lieu da di:
   chuan hoa anh (02) -> ResNet18 -> 512 chieu -> StandardScaler + PCA cua lan chay da chon (04)
   -> 3 mo hinh Softmax / SVM / XGBoost da huan luyen (04) -> du doan
 

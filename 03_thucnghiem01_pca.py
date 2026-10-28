@@ -3,8 +3,9 @@
 THUC NGHIEM 01: Khao sat so chieu dac trung sau PCA.
 
 Thu 5 muc: 32, 64, 128, 256, 512 (512 = giu nguyen, khong PCA). Moi muc chay 5 lan voi 5 cach chia
-du lieu (seed 0..4); moi lan fit lai StandardScaler + PCA tren tap train. Ba mo hinh dung sieu tham so
-mac dinh (DEFAULT_HP trong chung.py). Muc duoc chon (N_COMPONENTS) dung cho thuc nghiem 02.
+train / test (seed 0..4); moi lan fit lai StandardScaler + PCA tren tap train. Ba mo hinh dung sieu tham so
+mac dinh (DEFAULT_HP trong chung.py), huan luyen tren 85% cua train va do accuracy tren 15% con lai (val).
+Muc duoc chon (N_COMPONENTS) dung cho thuc nghiem 02.
 
 Dau ra:
   ketqua/thucnghiem01_pca.csv       - tung muc, tung mo hinh, tung lan chay
@@ -35,7 +36,7 @@ def chay(meta, F) -> pd.DataFrame:
     for dim in PCA_DIMS:
         t0 = time.time()
         for run, seed in enumerate(SEEDS, start=1):
-            X, y, idx, _, var_kept = chia_va_pca(meta, F, seed, dim)
+            X, y, idx, _, var_kept, _ = chia_va_pca(meta, F, seed, dim)
             src_test = meta.source.to_numpy()[idx["test"]]
             for name in MODEL_NAMES:
                 m, h, r = huan_luyen(name, X, y, DEFAULT_HP[name], seed)

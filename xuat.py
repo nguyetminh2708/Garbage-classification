@@ -26,8 +26,9 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 
-from chung import (CLASSES, DATA_ANH, GRID, HINH, KQ, MAX_EPOCHS, MODEL_NAMES, N_COMPONENTS, PATIENCE,
-                   SAMPLE_SEED, SEEDS, TEST_SIZE, VAL_SIZE, XGB_EARLY_STOP, XGB_MAX_ROUNDS, chia_va_pca, xgb)
+from chung import (CLASSES, DATA_ANH, GRID, HINH, KQ, MAX_EPOCHS, MODEL_NAMES, N_COMPONENTS, N_FOLDS, PATIENCE,
+                   SAMPLE_SEED, SEEDS, TEST_SIZE, VAL_FRAC, XGB_CV_ROUNDS, XGB_EARLY_STOP, XGB_FIXED, XGB_MAX_ROUNDS,
+                   chia_va_pca, gia_tri_luoi, xgb)
 
 
 def rel(p: str) -> str:
@@ -142,7 +143,7 @@ def ve_hinh_pca(df: pd.DataFrame, feats: np.ndarray) -> float:
     """hinh_3_4a: phuong sai tich luy theo so chieu; hinh_3_4b: du lieu tren 2 thanh phan chinh dau.
     Chi de minh hoa: fit PCA tren tap train cua mot lan chia (seed 42). Tra ve ti le phuong sai giu lai."""
     meta = df[["path", "label", "source"]].copy(); meta["y"] = meta.label.map({c: i for i, c in enumerate(CLASSES)})
-    _, _, _, prep, kept = chia_va_pca(meta, feats, 42, N_COMPONENTS)
+    _, _, _, prep, kept, _ = chia_va_pca(meta, feats, 42, N_COMPONENTS)
     cum = np.cumsum(prep["pca"].explained_variance_ratio_)
     plt.figure(figsize=(7, 4))
     plt.plot(np.arange(1, len(cum) + 1), cum)
@@ -194,20 +195,22 @@ def ve_hinh_thucnghiem01(df: pd.DataFrame, pca_dims: list) -> None:
 # Buoc 04: thuc nghiem 02
 # ============================================================================
 def tong_hop_sieu_tham_so(R):
+    """Gop ket qua GridSearchCV cua 5 lan chay theo tung to hop: trung binh cac chi so CV qua 5 lan."""
     tune, detail = R["tune"], R["detail"]
     hp = (tune.groupby(["Mô hình", "Siêu tham số"], sort=False)
-          .agg(**{"Số lần": ("Acc val", "size"), "Acc train TB": ("Acc train", "mean"), "Acc val TB": ("Acc val", "mean"),
-                  "Acc val ĐLC": ("Acc val", "std"), "Loss val TB": ("Loss val", "mean"), "Loss val ĐLC": ("Loss val", "std"),
-                  "Epoch/vòng dừng TB": ("Epoch/vòng dừng", "mean"), "Thời gian TB (giây)": ("Thời gian (giây)", "mean")}).reset_index())
+          .agg(**{"Số lần": ("Acc CV TB", "size"), "Acc train CV TB": ("Acc train CV TB", "mean"), "Acc CV TB": ("Acc CV TB", "mean"),
+                  "Acc CV ĐLC (giữa 5 lần)": ("Acc CV TB", "std"), "Loss CV TB": ("Loss CV TB", "mean"), "Loss CV ĐLC (giữa 5 lần)": ("Loss CV TB", "std"),
+                  "Hạng TB": ("Hạng", "mean"), "Thời gian fit TB (giây)": ("Thời gian fit TB (giây)", "mean")}).reset_index())
     chosen = detail.groupby(["Mô hình", "Siêu tham số chọn"]).size().rename("Số lần được chọn").reset_index().rename(columns={"Siêu tham số chọn": "Siêu tham số"})
     hp = hp.merge(chosen, how="left", on=["Mô hình", "Siêu tham số"]).fillna({"Số lần được chọn": 0})
     hp["Số lần được chọn"] = hp["Số lần được chọn"].astype(int)
     hp["_o"] = hp["Mô hình"].map({n: i for i, n in enumerate(MODEL_NAMES)})
-    hp = hp.sort_values(["_o", "Acc val TB"], ascending=[True, False]).drop(columns="_o").reset_index(drop=True)
+    hp = hp.sort_values(["_o", "Acc CV TB"], ascending=[True, False]).drop(columns="_o").reset_index(drop=True)
 
-    # anh huong tung tham so: voi moi gia tri, lay accuracy val TB tot nhat khi cac tham so khac tu do
+    # anh huong tung tham so: voi moi gia tri, lay accuracy CV TB tot nhat khi cac tham so khac tu do
+    luoi = {name: gia_tri_luoi(GRID[name]) for name in MODEL_NAMES}
     for name in MODEL_NAMES:
-        for k in GRID[name]:
+        for k in luoi[name]:
             if k not in hp: hp[k] = None
         for i in hp.index[hp["Mô hình"] == name]:
             for part in hp.at[i, "Siêu tham số"].split(", "):
@@ -215,15 +218,15 @@ def tong_hop_sieu_tham_so(R):
     marg = []
     for name in MODEL_NAMES:
         sub = hp[hp["Mô hình"] == name]
-        for k in GRID[name]:
-            for v in [str(x) for x in GRID[name][k]] + (["-"] if k == "gamma" else []):
+        for k, vals in luoi[name].items():
+            for v in [str(x) for x in vals] + (["-"] if k == "gamma" else []):
                 ss = sub[sub[k].astype(str) == v]
                 if len(ss):
                     marg.append({"Mô hình": name, "Tham số": k, "Giá trị": v, "Số tổ hợp": len(ss),
-                                 "Acc val TB tốt nhất": ss["Acc val TB"].max(), "Acc val TB trung bình": ss["Acc val TB"].mean(),
-                                 "Acc train TB (tại tổ hợp tốt nhất)": ss.loc[ss["Acc val TB"].idxmax(), "Acc train TB"]})
-    cols = ["Mô hình", "Siêu tham số", "Số lần", "Acc train TB", "Acc val TB", "Acc val ĐLC", "Loss val TB", "Loss val ĐLC",
-            "Epoch/vòng dừng TB", "Thời gian TB (giây)", "Số lần được chọn"]
+                                 "Acc CV TB tốt nhất": ss["Acc CV TB"].max(), "Acc CV TB trung bình": ss["Acc CV TB"].mean(),
+                                 "Acc train CV TB (tại tổ hợp tốt nhất)": ss.loc[ss["Acc CV TB"].idxmax(), "Acc train CV TB"]})
+    cols = ["Mô hình", "Siêu tham số", "Số lần", "Acc train CV TB", "Acc CV TB", "Acc CV ĐLC (giữa 5 lần)", "Loss CV TB",
+            "Loss CV ĐLC (giữa 5 lần)", "Hạng TB", "Thời gian fit TB (giây)", "Số lần được chọn"]
     return hp[cols], pd.DataFrame(marg)
 
 
@@ -244,16 +247,16 @@ def ve_hinh_thucnghiem02(R):
     loss_theo_epoch("Softmax Regression", "Epoch", "Log loss", "hinh_4_3_loss_softmax.png")
     loss_theo_epoch("XGBoost", "Vòng boosting (số cây)", "Log loss", "hinh_4_5_loss_xgboost.png")
 
-    # SVM: validation curve theo C tai gamma duoc chon cua tung lan
-    rbf = tune[tune["Mô hình"] == "SVM"].copy(); rbf["gamma"] = rbf["gamma"].astype(str)
+    # SVM: validation curve theo C tai kernel / gamma duoc chon cua tung lan (accuracy train va CV 5-fold)
+    svm = tune[tune["Mô hình"] == "SVM"].copy(); svm["gamma"] = svm["gamma"].astype(str); svm["C"] = svm["C"].astype(float)
     plt.figure(figsize=(7, 4))
     for run in range(1, len(SEEDS) + 1):
-        chosen = detail[(detail["Mô hình"] == "SVM") & (detail["Lần chạy"] == run)]["Siêu tham số chọn"].iloc[0]
-        g_best = chosen.split("gamma=")[1]
-        sub = rbf[(rbf["Lần chạy"] == run) & (rbf.gamma == g_best)].sort_values("C")
-        plt.plot(sub.C, sub["Loss train"], "o-", color="C0", label="train" if run == 1 else None)
-        plt.plot(sub.C, sub["Loss val"], "o-", color="C1", label="val" if run == 1 else None)
-    plt.xscale("log"); plt.xlabel("C"); plt.ylabel("Hinge loss"); plt.title("SVM (kernel RBF): hinge loss theo C qua 5 lần chạy")
+        chon = detail[(detail["Mô hình"] == "SVM") & (detail["Lần chạy"] == run)]
+        parts = dict(p.split("=") for p in chon["Siêu tham số chọn"].iloc[0].split(", "))
+        sub = svm[(svm["Lần chạy"] == run) & (svm.kernel == parts["kernel"]) & (svm.gamma == parts.get("gamma", "-"))].sort_values("C")
+        plt.plot(sub.C, sub["Acc train CV TB"], "o-", color="C0", label="train" if run == 1 else None)
+        plt.plot(sub.C, sub["Acc CV TB"], "o-", color="C1", label="CV 5-fold" if run == 1 else None)
+    plt.xscale("log"); plt.xlabel("C"); plt.ylabel("Accuracy"); plt.title("SVM: accuracy train và CV theo C qua 5 lần chạy")
     plt.legend(); plt.grid(alpha=0.3); plt.tight_layout(); plt.savefig(HINH / "hinh_4_4_svm_validation_curve.png", dpi=120); plt.close()
 
     fig, axes = plt.subplots(1, 3, figsize=(15, 4.6))
@@ -277,13 +280,15 @@ def bang_cau_hinh(R) -> pd.DataFrame:
     meta = R["meta"]
     return pd.DataFrame([
         ("Tổng số ảnh dùng", len(meta)), ("Số lần chạy", len(SEEDS)), ("Seed các lần", ", ".join(map(str, SEEDS))),
-        ("Seed chọn ảnh", SAMPLE_SEED), ("Tỉ lệ train / val / test", f"{1-VAL_SIZE-TEST_SIZE:.0%} / {VAL_SIZE:.0%} / {TEST_SIZE:.0%}"),
+        ("Seed chọn ảnh", SAMPLE_SEED), ("Tỉ lệ train / test", f"{1-TEST_SIZE:.0%} / {TEST_SIZE:.0%}, phân tầng theo (lớp, nguồn)"),
+        ("Chọn siêu tham số", f"GridSearchCV {N_FOLDS}-fold trên tập train, fold phân tầng theo (lớp, nguồn)"),
+        ("Huấn luyện mô hình cuối", f"giữ {VAL_FRAC:.0%} của train làm val để early stopping và vẽ loss, fit trên phần còn lại"),
         ("Trích đặc trưng", "ResNet18 (ImageNet), 512 chiều"), ("Số chiều", f"StandardScaler + PCA {N_COMPONENTS} chiều, fit trên train từng lần"),
-        ("Softmax: lưới", str(GRID["Softmax Regression"])), ("Softmax: epoch tối đa / patience", f"{MAX_EPOCHS} / {PATIENCE}"),
+        ("Softmax: lưới", str(GRID["Softmax Regression"])), ("Softmax: cố định", f"penalty l2; epoch tối đa {MAX_EPOCHS}, patience {PATIENCE}"),
         ("SVM: lưới", str(GRID["SVM"])), ("XGBoost: lưới", str(GRID["XGBoost"])),
-        ("XGBoost: vòng tối đa / early stopping", f"{XGB_MAX_ROUNDS} / {XGB_EARLY_STOP}"), ("XGBoost: cố định", "min_child_weight 2, reg_lambda 1"),
+        ("XGBoost: cố định", f"{XGB_FIXED}; trong CV {XGB_CV_ROUNDS} cây; mô hình cuối tối đa {XGB_MAX_ROUNDS} vòng, early stopping {XGB_EARLY_STOP}"),
         ("Số tổ hợp thử mỗi lần chạy", str(R["n_combo"])),
-        ("Tiêu chí chọn siêu tham số", "Loss val thấp nhất (Softmax, XGBoost); accuracy val cao nhất, hòa thì loss val thấp hơn (SVM)"),
+        ("Tiêu chí chọn siêu tham số", "Log loss CV thấp nhất (Softmax, XGBoost); accuracy CV cao nhất (SVM)"),
         ("Ngày chạy", time.strftime("%Y-%m-%d %H:%M")), ("Python", sys.version.split()[0]),
         ("scikit-learn / XGBoost", f"{__import__('sklearn').__version__} / {xgb.__version__ if xgb else 'không có'}"),
         ("Máy", f"{platform.platform()}; CPU {platform.processor() or 'không rõ'}"),
@@ -292,7 +297,8 @@ def bang_cau_hinh(R) -> pd.DataFrame:
 
 def ghi_cac_sheet(R, hp, marg, config):
     """Ghi 10 sheet so lieu vao ketqua/ket_qua_5_lan_chay.xlsx (sheet Tong_hop de trong, dien o ham sau)."""
-    tune_cols = ["Lần chạy", "Seed", "Mô hình", "Siêu tham số", "Epoch/vòng dừng", "Loss train", "Loss val", "Acc train", "Acc val", "Thời gian (giây)"]
+    tune_cols = ["Lần chạy", "Seed", "Mô hình", "Siêu tham số", "Acc train CV TB", "Acc CV TB", "Acc CV ĐLC"] + \
+                [f"Acc fold {k + 1}" for k in range(N_FOLDS)] + ["Loss CV TB", "Loss CV ĐLC", "Hạng", "Được chọn", "Thời gian fit TB (giây)"]
 
     xlsx = KQ / "ket_qua_5_lan_chay.xlsx"
     with pd.ExcelWriter(xlsx, engine="openpyxl") as w:
@@ -317,10 +323,11 @@ def sheet_tong_hop(xlsx, R) -> None:
     FONT, fill, thin = "Arial", PatternFill("solid", fgColor="DCE6F5"), Side(style="thin", color="BFBFBF")
     col_of = {src.cell(1, j).value: get_column_letter(j) for j in range(1, src.max_column + 1)}
     ws["A1"] = "TỔNG HỢP KẾT QUẢ 5 LẦN CHẠY"; ws["A1"].font = Font(name=FONT, size=13, bold=True)
-    ws["A2"] = f"{len(meta)} ảnh, 5 lớp, {N_COMPONENTS} chiều; mỗi lần chia lại train/val/test và chọn lại siêu tham số trên val. Mọi số trong bảng là công thức tính từ sheet Chi_tiet_5_lan."
+    ws["A2"] = (f"{len(meta)} ảnh, 5 lớp, {N_COMPONENTS} chiều; mỗi lần chia lại train/test, chọn lại siêu tham số bằng GridSearchCV {N_FOLDS}-fold trên train. "
+                "Mọi số trong bảng là công thức tính từ sheet Chi_tiet_5_lan.")
     ws["A2"].font = Font(name=FONT, size=10, italic=True, color="555555")
-    METRICS = ["Acc train", "Acc val", "Acc test", "Precision macro test", "Recall macro test", "F1 macro test",
-               "Acc test tự chụp", "Acc test RealWaste", "Loss train", "Loss val", "Thời gian tìm + huấn luyện (giây)"]
+    METRICS = ["Acc CV TB (tổ hợp chọn)", "Acc train", "Acc val", "Acc test", "Precision macro test", "Recall macro test", "F1 macro test",
+               "Acc test tự chụp", "Acc test RealWaste", "Loss train", "Loss val", "Thời gian GridSearchCV (giây)", "Thời gian tìm + huấn luyện (giây)"]
     STATS = [("Trung bình", "AVERAGE"), ("Độ lệch chuẩn", "STDEV"), ("Min", "MIN"), ("Max", "MAX")]
     r = 4
     for name in MODEL_NAMES:
