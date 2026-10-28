@@ -61,8 +61,7 @@ XGB_CV_ROUNDS = 300                         # XGBoost trong GridSearchCV: so cay
 XGB_FIXED = {"subsample": 0.8, "colsample_bytree": 0.8, "min_child_weight": 2, "reg_lambda": 1.0}
 GRID = {
     "Softmax Regression": {"alpha": [1e-4, 1e-3, 1e-2, 1e-1], "eta0": [1e-3, 1e-2]},                 # 8 to hop
-    "SVM": [{"kernel": ["linear"], "C": [0.1, 1, 10, 100]},                                           # 4
-            {"kernel": ["rbf"], "C": [0.1, 1, 10, 100], "gamma": ["scale", 1e-3, 1e-2]}],             # 12
+    "SVM": {"kernel": ["linear", "rbf"], "C": [0.1, 1, 10, 100]},                                      # 8 (gamma = scale)
     "XGBoost": {"max_depth": [3, 5, 7], "learning_rate": [0.05, 0.1, 0.3]},                          # 9
 }
 # sieu tham so mac dinh (dung cho thuc nghiem 01)
@@ -170,9 +169,7 @@ def tim_sieu_tham_so(name, X, y, strat_train, seed):
     cv = gs.cv_results_
     rows = []
     for i, p in enumerate(cv["params"]):
-        hp = dict(p)
-        if hp.get("kernel") == "linear":
-            hp["gamma"] = "-"
+        hp = _chuan_hp(dict(p))
         r = {"Mô hình": name, "Siêu tham số": hp_str(hp), **hp,
              "Acc train CV TB": cv["mean_train_acc"][i], "Acc CV TB": cv["mean_test_acc"][i], "Acc CV ĐLC": cv["std_test_acc"][i]}
         for k in range(N_FOLDS):
@@ -217,7 +214,7 @@ def fit_softmax(X, y, hp, seed):
 
 
 def fit_svm(X, y, hp, seed):
-    kw = {"gamma": hp["gamma"]} if hp["kernel"] == "rbf" else {}
+    kw = {"gamma": hp.get("gamma", "scale")} if hp["kernel"] == "rbf" else {}
     m = SVC(kernel=hp["kernel"], C=hp["C"], random_state=seed, **kw).fit(X["fit"], y["fit"])
     h = {"train_loss": [hinge_loss(y["fit"], m.decision_function(X["fit"]), labels=LABELS)],
          "val_loss": [hinge_loss(y["val"], m.decision_function(X["val"]), labels=LABELS)],
@@ -245,15 +242,22 @@ def hp_str(hp):
     return ", ".join(f"{k}={v}" for k, v in hp.items())
 
 
+def _chuan_hp(hp):
+    """SVM: kernel linear khong dung gamma (ghi '-'); kernel rbf khong co trong luoi thi gamma = scale."""
+    if hp.get("kernel") == "linear":
+        hp["gamma"] = "-"
+    elif hp.get("kernel") == "rbf":
+        hp.setdefault("gamma", "scale")
+    return hp
+
+
 def huan_luyen(name, X, y, hp, seed):
     """Huan luyen 1 mo hinh voi 1 bo sieu tham so. Tra ve (mo hinh, lich su loss, dong ket qua train/val)."""
     t = time.time()
     m, h, be = FIT[name](X, y, hp, seed)
     k = (be - 1) if be else -1                                    # vi tri diem dung trong lich su loss
     ka = k if len(h["train_acc"]) == len(h["train_loss"]) else -1  # SVM, XGBoost chi ghi accuracy mo hinh cuoi
-    hp_ghi = dict(hp)
-    if hp_ghi.get("kernel") == "linear":
-        hp_ghi["gamma"] = "-"
+    hp_ghi = _chuan_hp(dict(hp))
     r = {"Mô hình": name, "Siêu tham số": hp_str(hp_ghi), **hp_ghi, "Epoch/vòng dừng": be,
          "Loss train": h["train_loss"][k], "Loss val": h["val_loss"][k],
          "Acc train": h["train_acc"][ka], "Acc val": h["val_acc"][ka], "Thời gian (giây)": time.time() - t}
@@ -277,9 +281,7 @@ def to_hop_luoi(grid):
     for g in (grid if isinstance(grid, list) else [grid]):
         keys = list(g)
         for vals in itertools.product(*[g[k] for k in keys]):
-            hp = dict(zip(keys, vals))
-            if hp.get("kernel") == "linear":
-                hp["gamma"] = "-"
+            hp = _chuan_hp(dict(zip(keys, vals)))
             key = tuple(hp.items())
             if key not in seen:
                 seen.add(key); out.append(hp)

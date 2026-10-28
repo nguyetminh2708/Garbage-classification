@@ -42,7 +42,7 @@ Chạy lần lượt theo số thứ tự:
 ```
 python 01_thong_ke_du_lieu.py          # vài phút
 python 02_trich_dac_trung.py           # vài phút trên CPU; lần đầu cần mạng để tải trọng số ResNet18 (45 MB)
-python 03_thucnghiem01_pca.py          # khoảng 5 phút
+python 03_thucnghiem01_pca.py          # khoảng 3 phút (3 mức số chiều x 5 lần)
 python 04_thucnghiem02_sieu_tham_so.py # 15 đến 30 phút tùy số nhân CPU (25 tổ hợp x 5 fold x 5 lần, chạy song song)
 python 05_phan_loai_anh_moi.py anh.jpg # demo với ảnh mới
 ```

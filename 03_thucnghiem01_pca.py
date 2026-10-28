@@ -2,7 +2,7 @@
 """
 THUC NGHIEM 01: Khao sat so chieu dac trung sau PCA.
 
-Thu 5 muc: 32, 64, 128, 256, 512 (512 = giu nguyen, khong PCA). Moi muc chay 5 lan voi 5 cach chia
+Thu 3 muc: 32, 128, 512 (512 = giu nguyen, khong PCA). Moi muc chay 5 lan voi 5 cach chia
 train / test (seed 0..4); moi lan fit lai StandardScaler + PCA tren tap train. Ba mo hinh dung sieu tham so
 mac dinh (DEFAULT_HP trong chung.py), huan luyen tren 85% cua train va do accuracy tren 15% con lai (val).
 Muc duoc chon (N_COMPONENTS) dung cho thuc nghiem 02.
@@ -21,7 +21,7 @@ import pandas as pd
 from chung import DEFAULT_HP, MODEL_NAMES, SEEDS, chia_va_pca, danh_gia_test, doc_dac_trung, huan_luyen
 from xuat import tong_hop_pca, ve_hinh_thucnghiem01, xuat_thucnghiem01
 
-PCA_DIMS = [32, 64, 128, 256, 512]      # cac muc so chieu thu; 512 = khong PCA
+PCA_DIMS = [32, 128, 512]               # cac muc so chieu thu; 512 = khong PCA
 
 try:
     sys.stdout.reconfigure(encoding="utf-8")
